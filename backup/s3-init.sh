@@ -8,6 +8,8 @@ set -eu
 : "${BACKUP_ACCESS_KEY:?}"
 : "${BACKUP_SECRET_KEY:?}"
 
+export MC_DISABLE_PAGER=1
+
 mc alias set local http://s3:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null
 
 echo "[s3-init] waiting for minio ..."

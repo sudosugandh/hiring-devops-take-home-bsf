@@ -105,7 +105,9 @@ services:
     build: ./app
     environment:
       INSTANCE_NAME: app2
-      PORT: "3001"
+      # Containers don't share a network namespace, so this does not clash
+      # with app1. The edge upstream calls app2:3000.
+      PORT: "3000"
     restart: unless-stopped
 
   # S3-compatible storage standing in for AWS S3.

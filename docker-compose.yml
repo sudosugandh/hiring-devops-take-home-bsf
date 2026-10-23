@@ -123,15 +123,42 @@ services:
       - s3_data:/data
     restart: unless-stopped
 
+  # Bucket + upload-only user. Backup itself never gets the MinIO root keys.
+  s3-init:
+    build:
+      context: ./backup
+      dockerfile: Dockerfile.s3init
+    environment:
+      MINIO_ROOT_USER: bsfadmin
+      MINIO_ROOT_PASSWORD: bsf-s3-root-secret
+      BACKUP_ACCESS_KEY: bsf-backup
+      BACKUP_SECRET_KEY: bsf-backup-secret-2026
+    depends_on:
+      - s3
+    restart: "no"
+
   # Nightly backup job. Run manually with: docker compose run --rm backup
   backup:
     build: ./backup
+    environment:
+      DB_HOST: db
+      DB_USER: backup
+      DB_PASSWORD: backup-pass-2026
+      DB_NAME: wordpress
+      AWS_ACCESS_KEY_ID: bsf-backup
+      AWS_SECRET_ACCESS_KEY: bsf-backup-secret-2026
+      AWS_DEFAULT_REGION: us-east-1
+      S3_ENDPOINT: http://s3:9000
+      S3_BUCKET: bsf-backups
+      S3_PREFIX: site-x
     volumes:
       - ./backup/backup.sh:/backup.sh:ro
     entrypoint: ["sh", "/backup.sh"]
     depends_on:
-      - db
-      - s3
+      db:
+        condition: service_started
+      s3-init:
+        condition: service_completed_successfully
     profiles: ["jobs"]
 
 volumes:

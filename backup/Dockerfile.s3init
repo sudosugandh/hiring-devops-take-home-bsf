@@ -1,0 +1,16 @@
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates curl \
+    && arch="$(uname -m)" \
+    && case "$arch" in \
+         x86_64) mc_arch=amd64 ;; \
+         aarch64|arm64) mc_arch=arm64 ;; \
+         *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+       esac \
+    && curl -fsSL "https://dl.min.io/client/mc/release/linux-${mc_arch}/mc" -o /usr/local/bin/mc \
+    && chmod +x /usr/local/bin/mc
+
+COPY s3-init.sh /s3-init.sh
+COPY s3-policy.json /policy.json
+
+ENTRYPOINT ["sh", "/s3-init.sh"]

@@ -1,21 +1,53 @@
 #!/bin/sh
-# Nightly WordPress database backup -> S3 (MinIO locally, AWS S3 in production)
-set -e
+# Dump the wordpress database and upload it to s3://$S3_BUCKET/$S3_PREFIX/
+# If mariadb-dump fails, the job fails. Don't ship a gzip of an empty stdout.
+set -eu
+set -o pipefail
 
-export AWS_ACCESS_KEY_ID=bsfadmin
-export AWS_SECRET_ACCESS_KEY=bsf-s3-root-secret
-export AWS_DEFAULT_REGION=us-east-1
-S3="aws --endpoint-url http://s3:9000 s3"
+: "${DB_HOST:?}"
+: "${DB_USER:?}"
+: "${DB_PASSWORD:?}"
+: "${DB_NAME:?}"
+: "${AWS_ACCESS_KEY_ID:?}"
+: "${AWS_SECRET_ACCESS_KEY:?}"
+: "${S3_ENDPOINT:?}"
+: "${S3_BUCKET:?}"
+: "${S3_PREFIX:?}"
+: "${AWS_DEFAULT_REGION:=us-east-1}"
 
-BUCKET=bsf-backups
+export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_DEFAULT_REGION
+export AWS_S3_ADDRESSING_STYLE=path
+
 STAMP=$(date +%Y%m%d-%H%M%S)
 FILE=/tmp/wordpress-$STAMP.sql.gz
+CNF=/tmp/backup-client.cnf
 
-echo "[backup] dumping database ..."
-mariadb-dump -h db -u root -proot-pass-2026 --all-databases | gzip > "$FILE"
+cleanup() {
+  rm -f "$CNF" "$FILE"
+}
+trap cleanup EXIT
 
-echo "[backup] uploading ..."
-$S3 mb "s3://$BUCKET" 2>/dev/null || true
-$S3 cp "$FILE" "s3://$BUCKET/site-x/"
+umask 077
+cat > "$CNF" <<EOF
+[client]
+host=$DB_HOST
+user=$DB_USER
+password=$DB_PASSWORD
+EOF
 
-echo "[backup] done: s3://$BUCKET/site-x/$(basename "$FILE")"
+echo "[backup] dumping ${DB_NAME} ..."
+mariadb-dump \
+  --defaults-extra-file="$CNF" \
+  --single-transaction \
+  --quick \
+  --default-character-set=utf8mb4 \
+  "$DB_NAME" | gzip > "$FILE"
+
+gzip -t "$FILE"
+bytes=$(wc -c < "$FILE")
+echo "[backup] dump is ${bytes} bytes, uploading ..."
+
+aws --endpoint-url "$S3_ENDPOINT" s3 cp \
+  "$FILE" "s3://${S3_BUCKET}/${S3_PREFIX}/$(basename "$FILE")"
+
+echo "[backup] done: s3://${S3_BUCKET}/${S3_PREFIX}/$(basename "$FILE")"

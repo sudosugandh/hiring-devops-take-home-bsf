@@ -1,6 +1,5 @@
 #!/bin/sh
-# Create the bucket and a user that can only upload under site-x/.
-# mc alias set does not connect, so admin info is the actual wait.
+# Bucket bsf-backups and a user that can only upload under site-x/.
 set -eu
 
 : "${MINIO_ROOT_USER:?}"
@@ -10,7 +9,7 @@ set -eu
 
 export MC_DISABLE_PAGER=1
 
-# alias set probes the server, so it has to be inside the retry.
+# alias set contacts MinIO, so keep it in the retry.
 echo "[s3-init] waiting for minio ..."
 i=0
 until mc alias set local http://s3:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null 2>&1 \
@@ -27,7 +26,6 @@ done
 
 mc mb -p local/bsf-backups >/dev/null 2>&1 || true
 
-# create overwrites an existing policy, so a second boot stays in sync
 mc admin policy create local backup-upload /policy.json
 
 if ! mc admin user info local "$BACKUP_ACCESS_KEY" >/dev/null 2>&1; then

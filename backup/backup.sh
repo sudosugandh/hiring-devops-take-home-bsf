@@ -1,6 +1,5 @@
 #!/bin/sh
-# Dump the wordpress database and upload it to s3://$S3_BUCKET/$S3_PREFIX/
-# If mariadb-dump fails, the job fails. Don't ship a gzip of an empty stdout.
+# Dump wordpress and upload it to s3://$S3_BUCKET/$S3_PREFIX/
 set -eu
 set -o pipefail
 

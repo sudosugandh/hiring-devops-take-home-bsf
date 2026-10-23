@@ -33,13 +33,12 @@ wp plugin is-installed redis-cache || wp plugin install redis-cache
 wp plugin activate redis-cache
 wp redis enable --force || true
 
-# Init SQL adds this on a fresh volume. Re-apply it if the volume is older.
+# db/init adds this on a new volume. Older volumes need it here.
 if ! wp db query "SHOW INDEX FROM wp_bsf_orders WHERE Key_name = 'customer_email_created'" | grep -q customer_email_created; then
   echo "[setup] indexing wp_bsf_orders (customer_email, created_at) ..."
   wp db query "ALTER TABLE wp_bsf_orders ADD INDEX customer_email_created (customer_email, created_at)"
 fi
 
-# Nothing in this stack reads a .env, and nginx would serve it as a static file.
 rm -f .env wp-content/debug.log
 
 echo "[setup] done. Open https://localhost:8443 (admin / admin-pass-2026)"

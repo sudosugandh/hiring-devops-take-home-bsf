@@ -1,34 +1,53 @@
 # How I used AI
-
 ## Tools used
 
-Claude, inside Cursor. I also read the configs myself. The plugin, the compose file, the nginx vhosts, the pool file, redis, and `backup.sh` are not that big.
+- [Claude](https://claude.ai)
 
-## How I used them
+## How I used it
 
-- Walked the reported symptoms against the files and asked what else could cause the same symptom, so I wouldn't stop at the first match.
-- Asked for a review of `backup.sh` specifically around "the script exits 0". That's where pipefail came from. I already didn't like `--all-databases` as root.
-- Used it as a second pair of eyes on the S3 policy, mostly to check I hadn't granted `ListBucket` or `DeleteObject` by accident.
-- I decided the pool numbers, the memory limit, and what not to change (the plugin, `FORCE_SSL_ADMIN`, the 8 second sleep).
+**A dump that exits 0 is not a backup.**  
+`backup.sh` was `mariadb-dump | gzip` with `set -e`, then an upload. In `/bin/sh`, `set -e` does not fail the script when the first stage of a pipeline fails. The gzip of an empty stdout still succeeds, `aws s3 cp` returns 0, and the log says done. I was already dropping `--all-databases` and the root account. I asked Claude which line hides the failure. It said `pipefail`. I checked that Alpine's `/bin/sh` has it, then I shipped that.
+
+**What the database user actually needs.**  
+Claude suggested dumping as root, or `GRANT ALL` / `RELOAD ON *.*`, so the dump could not fail on a missing privilege. `--single-transaction` on InnoDB does not need `RELOAD`. The account in `db/init/20-backup-user.sql` is `SELECT`, `SHOW VIEW`, `TRIGGER`, and `LOCK TABLES` on `wordpress` only. It cannot write, and it cannot see the other databases.
+
+**The upload role.**  
+New objects under `s3://bsf-backups/site-x/` only. A large `aws s3 cp` uses multipart, so the policy has `PutObject`, `AbortMultipartUpload`, and `ListMultipartUploadParts`. I had Claude read it for anything wider.
 
 ## Key prompts
 
-1. "Wordpress behind an nginx TLS proxy, `FORCE_SSL_ADMIN` on, browser says too many redirects. What's the usual cause and what's a bad fix?"
-2. "This backup is `mariadb-dump | gzip` with `set -e` and then `aws s3 cp`. Why would it print done when the dump failed?"
-3. "Next.js app, two containers, upstream `app1:3000` and `app2:3000`, app2 has `PORT=3001`, `proxy_next_upstream off`. Why would /app fail on some refreshes only?"
-4. "Redis `maxmemory 1mb` and `noeviction` in front of the WordPress object cache. What does the plugin actually show, and is `maxmemory 0` a fix?"
+1. Backup pipeline
+
+   ```text
+   backup.sh is `mariadb-dump | gzip` with set -e, then aws s3 cp.
+   Which part still exits 0 when the dump fails?
+   ```
+
+2. Database grant
+
+   ```text
+   InnoDB dump with --single-transaction. What is the minimum grant
+   on the wordpress database? Do not offer root or RELOAD on *.*.
+   ```
+
+3. Upload policy
+
+   ```text
+   Upload only under s3://bsf-backups/site-x/. Multipart is in scope.
+   List and delete are not. Did I grant either?
+   ```
 
 ## When the AI was wrong or risky
 
-A few suggestions would have made the ticket go green and left the real bug in place.
+Two suggestions would have made the job look fine and made it worse.
 
-- It said to turn `FORCE_SSL_ADMIN` off to kill the redirect loop. That stops the redirects. It also means we "fixed" HTTPS detection by not requiring HTTPS. I kept the flag and passed the scheme from the edge. It sets `X-Forwarded-Proto` from `$scheme`, not from the incoming header.
-- It suggested editing `bsf-shop.php`: lower the export `LIMIT`, and add an index hint in the lookup SQL. The README says that plugin is third-party. The export is a memory limit. The lookup is a missing index on `customer_email`. Both are outside the plugin. `memory_limit` is also a `php_admin_value`, so the plugin couldn't raise it anyway.
-- For the random `/app` 502s it said to turn `proxy_next_upstream` back on. That would make the page load, by retrying app1, while app2 stayed on the wrong port. I changed app2 to port 3000. The retry is there too, but only so a dead process doesn't take down the request. It is not how I checked the fix. Both upstreams have to be on 3000.
-- For the object cache errors it suggested `maxmemory 0` and a `FLUSHALL`. Removing the cap means a noisy plugin can grow Redis until the box is unhappy. `allkeys-lru` with a real cap is the cache config. `noeviction` is what you use when the data isn't a cache.
+- Add `s3:ListBucket` and `s3:DeleteObject` so the job can see old backups and delete them. The uploader could then read every backup name and wipe them. Retention is a bucket lifecycle rule, not a privilege on this job.
+- Dump as root, or grant `RELOAD` on `*.*`. That is a global privilege so the client does not error. `--single-transaction` does not need it. The backup user stays read-only on `wordpress`.
 
-## What I'd never let an AI do unchecked on a production server
+I ran the job with the limited S3 user. The upload succeeded. List and delete both came back access denied.
 
-- Restart php-fpm, flush Redis, or `docker compose down -v` because a prompt said the cache was corrupt. That's how you hide the thing you needed to see, or delete the volume.
-- Apply a diff that publishes a port, turns `protected-mode` off, or writes a password into the docroot, without reading it line by line. Those were already the bugs in this repo.
-- Run a dump or a restore it wrote against the live database. The original backup script is a good example of a command that exits 0 and still isn't a backup.
+## What I would not let an AI do unchecked
+
+- Run a dump or a restore it wrote against the database. Exit code 0 is not a backup.
+- Widen an IAM policy, or a database grant, because the client complained.
+- Delete a volume or flush a cache to clear an error.

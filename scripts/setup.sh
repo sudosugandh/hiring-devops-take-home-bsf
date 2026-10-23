@@ -39,14 +39,7 @@ if ! wp db query "SHOW INDEX FROM wp_bsf_orders WHERE Key_name = 'customer_email
   wp db query "ALTER TABLE wp_bsf_orders ADD INDEX customer_email_created (customer_email, created_at)"
 fi
 
-# Deploy env file used by our release tooling
-cat > /var/www/html/.env <<ENV
-APP_ENV=production
-DB_HOST=db
-DB_NAME=wordpress
-DB_USER=wpuser
-DB_PASSWORD=wp-db-pass-2026
-S3_BUCKET=bsf-backups
-ENV
+# Nothing in this stack reads a .env, and nginx would serve it as a static file.
+rm -f .env wp-content/debug.log
 
 echo "[setup] done. Open https://localhost:8443 (admin / admin-pass-2026)"

@@ -13,8 +13,9 @@ x-wp-env: &wp-env
     define('FORCE_SSL_ADMIN', true);
     define('WP_REDIS_HOST', 'redis');
     define('WP_REDIS_PORT', 6379);
+    define('WP_REDIS_PASSWORD', 'bsf-redis-cache-2026');
     define('WP_REDIS_GRACEFUL', true);
-    define('WP_DEBUG_LOG', '/var/www/html/wp-content/debug.log');
+    define('WP_DEBUG_LOG', '/tmp/wp-debug.log');
     define('WP_DEBUG_DISPLAY', false);
 
 services:
@@ -87,8 +88,6 @@ services:
   redis:
     image: redis:7.4-alpine
     command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
-    ports:
-      - "6379:6379"
     volumes:
       - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
     restart: unless-stopped
